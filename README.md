@@ -38,7 +38,7 @@ random_key = jax.random.PRNGKey(0)
 
 trainer = MCCFRTrainer(env=env, policy=policy)
 
-training_state = trainer.train(
+training_state, metrics = trainer.train(
     random_key=random_key, n_iterations=100_000, metrics_period=5_000
 )
 ```
@@ -50,7 +50,7 @@ training_state = trainer.train(
 |---|---|
 | MCCFR (outcome-sampling)  |  :white_check_mark: |
 | MCCFR (other variants) | :x: |
-| Vanilla CFR  | :x: |
+| Vanilla CFR  | :white_check_mark: |
 |  Deep CFR | :x:  |
 
 | Metrics |   |

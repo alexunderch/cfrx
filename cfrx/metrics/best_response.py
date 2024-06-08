@@ -7,58 +7,55 @@ from jaxtyping import Array, Float, Int
 from cfrx.tree import Tree
 
 
-def backward_one_info_set(
+def backward_one_infoset(
     tree: Tree,
     info_states: Array,
-    current_info_state: Int[Array, ""],
+    current_infoset: Int[Array, ""],
     br_player: int,
     depth: Int[Array, ""],
 ) -> Tree:
     # Select all nodes in this infoset
-    ntn_at_depth = (tree.depth == depth) & (~tree.states.terminated)
-    selected_info_set_mask = (info_states == current_info_state) & ntn_at_depth
+    infoset_mask = (
+        (tree.depth == depth)
+        & (~tree.states.terminated)
+        & (info_states == current_infoset)
+    )
 
-    is_br_player = (tree.states.current_player == br_player) & ~tree.states.chance_node
-
-    is_br_player = (is_br_player * selected_info_set_mask).sum() > 0
-
-    legal_action_mask = (
-        tree.states.legal_action_mask * selected_info_set_mask[..., None]
-    ).sum(axis=0) > 0
+    is_br_player = (
+        (tree.states.current_player == br_player)
+        & (~tree.states.chance_node)
+        & infoset_mask
+    ).any()
 
     p_opponent = tree.extra_data["p_opponent"]
     p_chance = tree.extra_data["p_chance"]
+    p_self = tree.extra_data["p_self"]
 
     # Get expected values for each of the node in the infoset
-    cf_reach_prob = p_opponent[..., None] * p_chance[..., None]
+    cf_reach_prob = (p_opponent * p_chance * p_self)[..., None]
 
-    best_response_values = jnp.where(
-        selected_info_set_mask[..., None],
-        tree.children_values[..., br_player] * cf_reach_prob,
-        jnp.nan,
+    legal_action_mask = (tree.states.legal_action_mask & infoset_mask[..., None]).any(
+        axis=0
     )
 
-    best_response_values = jnp.nansum(best_response_values, axis=0)
+    best_response_values = tree.children_values[..., br_player] * cf_reach_prob  # (T, a)
+    best_response_values = jnp.sum(
+        best_response_values, axis=0, where=infoset_mask[..., None]  # (a,)
+    )
+
     best_action = jnp.where(legal_action_mask, best_response_values, -jnp.inf).argmax()
 
-    best_response_current_value = tree.children_values[:, best_action, br_player]
+    br_value = tree.children_values[:, best_action, br_player]
 
     expected_current_value = (
         tree.children_values[..., br_player] * tree.children_prior_logits
     ).sum(axis=1)
 
-    current_value = jnp.where(
-        is_br_player,
-        best_response_current_value,
-        expected_current_value,
-    )
+    current_value = jnp.where(is_br_player, br_value, expected_current_value)
 
     new_node_values = jnp.where(
-        selected_info_set_mask,
-        current_value,
-        tree.node_values[..., br_player],
+        infoset_mask, current_value, tree.node_values[..., br_player]
     )
-
     new_children_values = jnp.where(
         tree.children_index != -1, new_node_values[tree.children_index], 0
     )
@@ -80,44 +77,35 @@ def backward_one_depth_level(
     info_states = jax.vmap(info_state_fn)(tree.states.info_state)
 
     def cond_fn(val: tuple[Tree, Array]) -> Array:
-        tree, backward_visited = val
-        ntn_at_depth = (tree.depth == depth) & (~tree.states.terminated)
-
-        count_ntn_to_visit = jnp.where(ntn_at_depth & ~backward_visited, 1, 0).sum()
-
-        return count_ntn_to_visit > 0
+        tree, visited = val
+        nodes_to_visit_idx = (
+            (tree.depth == depth) & (~tree.states.terminated) & (~visited)
+        )
+        return nodes_to_visit_idx.any()
 
     def loop_fn(val: tuple[Tree, Array]) -> tuple[Tree, Array]:
-        tree, backward_visited = val
-        ntn_at_depth = (tree.depth == depth) & (~tree.states.terminated)
+        tree, visited = val
+        nodes_to_visit_idx = (
+            (tree.depth == depth) & (~tree.states.terminated) & (~visited)
+        )
 
-        ntn_to_visit = jnp.where(ntn_at_depth & ~backward_visited, info_states, -1)
+        # Select an infoset to resolve
+        selected_infoset_idx = nodes_to_visit_idx.argmax()
+        selected_infoset = info_states[selected_infoset_idx]
 
-        # Select an infoset to reduce
-        selected_infoset_idx = ntn_to_visit.argmax()
-        selected_info_state = info_states[selected_infoset_idx]
-
-        tree = backward_one_info_set(
+        tree = backward_one_infoset(
             tree=tree,
             depth=depth,
             info_states=info_states,
-            current_info_state=selected_info_state,
+            current_infoset=selected_infoset,
             br_player=br_player,
         )
 
-        selected_info_set_mask = info_states == selected_info_state
-        backward_visited = jnp.where(
-            selected_info_set_mask, jnp.bool_(True), backward_visited
-        )
+        visited = jnp.where(info_states == selected_infoset, True, visited)
+        return tree, visited
 
-        return tree, backward_visited
-
-    n_max_nodes = tree.node_values.shape[0]
-    backward_visited = jnp.zeros(n_max_nodes).astype(bool)
-
-    tree, backward_visited = jax.lax.while_loop(
-        cond_fn, loop_fn, (tree, backward_visited)
-    )
+    visited = jnp.zeros(tree.node_values.shape[0], dtype=bool)
+    tree, visited = jax.lax.while_loop(cond_fn, loop_fn, (tree, visited))
 
     return tree
 

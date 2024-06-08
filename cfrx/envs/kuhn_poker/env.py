@@ -23,12 +23,17 @@ INFO_SETS_VALUES = np.stack(list(INFO_SETS.values()))
 class InfoState(NamedTuple):
     private_card: Int[Array, "..."]
     action_sequence: Int[Array, "..."]
+    chance_round: Int[Array, "..."]
+    chance_node: Bool[Array, "..."]
 
 
 @dataclass
 class State(pgx.kuhn_poker.State):
     info_state: InfoState = InfoState(
-        private_card=jnp.int8(-1), action_sequence=jnp.ones(2, dtype=jnp.int8) * -1
+        private_card=jnp.int8(-1),
+        action_sequence=jnp.ones(2, dtype=jnp.int8) * -1,
+        chance_round=jnp.int8(0),
+        chance_node=jnp.bool_(True),
     )
     chance_node: Bool[Array, "..."] = jnp.bool_(False)
     chance_prior: Int[Array, "..."] = (
@@ -81,15 +86,24 @@ class KuhnPoker(pgx.kuhn_poker.KuhnPoker, cfrx.envs.Env):
         )
 
         action_sequence = jnp.where(state.chance_node, -1, action_sequence)
-
+        chance_round = info_state.chance_round + state.chance_node
         info_state = info_state._replace(
-            private_card=private_card, action_sequence=action_sequence
+            private_card=private_card,
+            action_sequence=action_sequence,
+            chance_round=chance_round,
+            chance_node=next_state.chance_node,
         )
         return info_state
 
     def info_state_to_str(self, info_state: InfoState) -> str:
+        if info_state.chance_node:
+            rep = f"chance{info_state.chance_round}:"
+
+        else:
+            rep = ""
+
         strings = ["b", "p"]
-        rep = f"{info_state.private_card}"
+        rep += f"{info_state.private_card}"
 
         for action in np.array(info_state.action_sequence):
             action = action // 2
@@ -106,7 +120,10 @@ class KuhnPoker(pgx.kuhn_poker.KuhnPoker, cfrx.envs.Env):
         env_state = super()._init(rng)
 
         info_state = InfoState(
-            private_card=jnp.int8(-1), action_sequence=jnp.ones(2, dtype=jnp.int8) * -1
+            private_card=jnp.int8(-1),
+            action_sequence=jnp.ones(2, dtype=jnp.int8) * -1,
+            chance_round=jnp.int8(0),
+            chance_node=jnp.bool_(True),
         )
 
         return State(

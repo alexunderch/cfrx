@@ -33,9 +33,8 @@ class Tree(NamedTuple):
     State of a search tree.
 
     The `Tree` dataclass is used to hold and inspect search data for a batch of
-    inputs. In the fields below `N` represents
-    the number of nodes in the tree, and `n_actions` is the number of discrete
-    actions.
+    inputs. In the fields below `N` represents the number of nodes in the tree,
+    and `n_actions` is the number of discrete actions.
 
     node_visits: `[N]` the visit counts for each node.
     raw_values: `[N, n_players]` the raw value for each node.

@@ -24,6 +24,8 @@ class InfoState(NamedTuple):
     private_card: Int[Array, ""]
     public_card: Int[Array, ""]
     action_sequence: Int[Array, "..."]
+    chance_round: Int[Array, "..."]
+    chance_node: Bool[Array, "..."]
 
 
 @dataclass
@@ -32,6 +34,8 @@ class State(pgx.leduc_holdem.State):
         private_card=jnp.int8(-1),
         public_card=jnp.int8(-1),
         action_sequence=jnp.ones((2, 4), dtype=jnp.int8) * -1,
+        chance_round=jnp.int8(0),
+        chance_node=jnp.bool_(True),
     )
     chance_node: Bool[Array, ""] = jnp.bool_(False)
     chance_prior: Float[Array, "..."] = (
@@ -89,15 +93,23 @@ class LeducPoker(pgx.leduc_holdem.LeducHoldem, cfrx.envs.Env):
             info_state,
             updated_info_state,
         )
-
+        chance_round = info_state.chance_round + state.chance_node
         return info_state._replace(
             private_card=private_card,
             public_card=public_card,
+            chance_round=chance_round,
+            chance_node=next_state.chance_node,
         )
 
     def info_state_to_str(self, info_state: InfoState) -> str:
+        if info_state.chance_node:
+            rep = f"chance{info_state.chance_round}:"
+
+        else:
+            rep = ""
+
         strings = ["c", "r", "f"]
-        rep = f"{info_state.private_card}"
+        rep += f"{info_state.private_card}"
 
         for action in np.array(info_state.action_sequence)[0]:
             if action != -1:
@@ -120,6 +132,8 @@ class LeducPoker(pgx.leduc_holdem.LeducHoldem, cfrx.envs.Env):
             private_card=jnp.int8(-1),
             public_card=jnp.int8(-1),
             action_sequence=jnp.ones((2, 4), dtype=jnp.int8) * -1,
+            chance_round=jnp.int8(0),
+            chance_node=jnp.bool_(True),
         )
         cards = jnp.int8([-1, -1, -1])
         return State(
@@ -138,7 +152,7 @@ class LeducPoker(pgx.leduc_holdem.LeducHoldem, cfrx.envs.Env):
             _raise_count=env_state._raise_count,
             info_state=info_state,
             chance_prior=jnp.ones(NUM_DIFFERENT_CARDS, dtype=int) * NUM_REPEAT_CARDS,
-            chance_node=True,
+            chance_node=jnp.bool_(True),
         )
 
     def _resolve_decision_node(

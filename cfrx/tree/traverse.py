@@ -314,5 +314,12 @@ def traverse_tree_cfr(
 
         return tree, n
 
+    tree = tree._replace(
+        children_index=jnp.full(
+            tree.children_index.shape,
+            Tree.UNVISITED,
+            dtype=jnp.int32,
+        )
+    )
     tree, _ = jax.lax.while_loop(cond_fn, loop_fn, (tree, 0))
     return tree
