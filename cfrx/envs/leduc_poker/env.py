@@ -10,8 +10,8 @@ from pgx._src.dwg.leduc_holdem import CARD
 from pgx._src.struct import dataclass
 
 import cfrx.envs
-from cfrx.envs.leduc_poker.constants import INFO_SETS
-from cfrx.utils import ravel, reverse_array_lookup
+from cfrx.envs.leduc_poker.constants import INFO_SETS, REVERSE_INFO_SETS_LOOKUP
+from cfrx.utils import ravel
 
 CARD.append("?")
 INFO_SETS_VALUES = np.stack(list(INFO_SETS.values()))
@@ -41,6 +41,18 @@ class State(pgx.leduc_holdem.State):
     chance_prior: Float[Array, "..."] = (
         jnp.ones(NUM_DIFFERENT_CARDS, dtype=int) * NUM_REPEAT_CARDS
     )
+
+
+def convert_info_state_to_idx(info_state: InfoState) -> jnp.ndarray:
+    """
+    This is a bit hacky, it allows to transform an infostate into an index, and to
+    construct an array to efficiently lookup in Jax.
+    """
+
+    info_state_ravel = ravel(info_state)
+    multiplier = jnp.array([3**k for k in range(info_state_ravel.shape[-1])])
+    idx = jnp.sum((info_state_ravel + 1) * multiplier) % 1235
+    return idx
 
 
 class LeducPoker(pgx.leduc_holdem.LeducHoldem, cfrx.envs.Env):
@@ -123,8 +135,8 @@ class LeducPoker(pgx.leduc_holdem.LeducHoldem, cfrx.envs.Env):
         return rep
 
     def info_state_idx(self, info_state: InfoState) -> Array:
-        info_state_ravel = ravel(info_state)
-        return reverse_array_lookup(info_state_ravel, INFO_SETS_VALUES)
+        idx = convert_info_state_to_idx(info_state)
+        return jnp.asarray(REVERSE_INFO_SETS_LOOKUP)[idx]
 
     def _init(self, rng: Shaped[PRNGKeyArray, "2"]) -> State:
         env_state = super()._init(rng)
