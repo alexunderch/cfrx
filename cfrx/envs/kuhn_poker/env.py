@@ -112,6 +112,16 @@ class KuhnPoker(pgx.kuhn_poker.KuhnPoker, cfrx.envs.Env):
 
         return rep
 
+    def get_action_mask(self, state: State) -> jax.Array:
+
+        action_mask = jax.lax.cond(
+            state.chance_node,
+            lambda x: (x.chance_prior > 0),
+            lambda x: x.legal_action_mask,
+            state,
+        )
+        return action_mask
+
     def info_state_idx(self, info_state: InfoState) -> Int[Array, ""]:
         info_state_ravel = ravel(info_state)
         return reverse_array_lookup(info_state_ravel, jnp.asarray(INFO_SETS_VALUES))

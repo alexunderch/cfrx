@@ -52,17 +52,16 @@ def instantiate_tree_from_root(
         children_rewards=jnp.zeros(
             (n_max_nodes, n_actions, n_players), dtype=data_dtype
         ),
+        to_visit=jnp.zeros(n_max_nodes, dtype=bool),
         states=jax.tree_util.tree_map(_zeros, root.state),
         depth=jnp.ones(n_max_nodes, dtype=jnp.int32) * -1,
         extra_data={},
     )
     new_tree: Tree = tree._replace(
         node_visits=tree.node_visits.at[Tree.ROOT_INDEX].set(1),
-        # node_values=tree.node_values.at[Tree.ROOT_INDEX].set(root.value),
         states=jax.tree_map(
             lambda x, y: x.at[Tree.ROOT_INDEX].set(y), tree.states, root.state
         ),
-        # raw_values=tree.node_values.at[Tree.ROOT_INDEX].set(root.value),
         children_prior_logits=tree.children_prior_logits.at[Tree.ROOT_INDEX].set(
             root.prior_logits
         ),
@@ -87,34 +86,46 @@ def initialize_running_probabilities(tree: Tree) -> Tree:
     return tree
 
 
-def select_new_node_and_play(
-    tree: Tree, env: pgx.Env
-) -> tuple[PyTree, Int[Array, ""], Int[Array, ""]]:
-    action_mask = jax.vmap(get_action_mask)(tree.states)
+def add_children(
+    tree: Tree, state: PyTree, env: pgx.Env, node_number: jax.Array
+) -> tuple[Tree, jax.Array]:
 
-    is_to_visit = (
-        (action_mask * (1 - tree.states.terminated)[..., None] * tree.children_index) < 0
-    ).any(axis=1)
+    action_mask = env.get_action_mask(state)
+    n_actions = len(action_mask)
+    n_max_nodes = len(tree.to_visit)
+    action_idx = jnp.where(action_mask, jnp.arange(n_actions), n_max_nodes)
+    action_idx = jnp.sort(action_idx)
 
-    parent_index = jnp.argmax(is_to_visit)
+    update_idx = jnp.arange(n_actions) + node_number
+    update_idx = jnp.where(action_idx == n_max_nodes, n_max_nodes, update_idx)
+    action_from_parent = tree.action_from_parent.at[update_idx].set(action_idx)
+    parents = tree.parents.at[update_idx].set(node_number)
+    to_visit = tree.parents.at[update_idx].set(True)
 
-    unexplored_actions = jnp.where(
-        tree.children_index[parent_index] == Tree.UNVISITED,
-        action_mask[parent_index] & ~tree.states.terminated[parent_index],
-        False,
+    tree = tree._replace(
+        action_from_parent=action_from_parent, parents=parents, to_visit=to_visit
     )
 
-    action = jnp.argmax(unexplored_actions)
+    return tree, action_mask.sum()
+
+
+def select_new_node_and_play(
+    tree: Tree, env: pgx.Env
+) -> tuple[PyTree, jax.Array, jax.Array, jax.Array]:
+
+    child_index = jnp.argmax(tree.to_visit)
+    parent_index = tree.parents[child_index]
+    action = tree.action_from_parent[child_index]
 
     new_state = env.step(jax.tree_map(lambda x: x[parent_index], tree.states), action)
 
-    return new_state, parent_index, action
+    return new_state, parent_index, child_index, action
 
 
 def update_running_probabilities(
     tree: Tree,
-    parent_index: Int[Array, ""],
-    next_node_index: Int[Array, ""],
+    parent_index: jax.Array,
+    next_node_index: jax.Array,
     strategy: Float[Array, ""],
     env: pgx.Env,
     traverser: int,
@@ -176,55 +187,39 @@ def traverse_tree_vanilla(
     def cond_fn(val: Tuple) -> Bool[Array, ""]:
         tree, n = val
         n_max_nodes = len(tree.node_visits)
-        action_mask = jax.vmap(get_action_mask)(tree.states)
-        is_to_visit = (
-            (action_mask * (1 - tree.states.terminated)[..., None] * tree.children_index)
-            < 0
-        ).any(axis=1)
 
-        return jnp.logical_and(is_to_visit.any(), (n < n_max_nodes))
+        return tree.to_visit.any() & (n < n_max_nodes)
 
     def loop_fn(val: Tuple) -> Tuple:
         tree, n = val
 
-        n += 1
-        next_node_index = n
+        new_state, parent_index, child_index, action = select_new_node_and_play(
+            tree, env
+        )
 
-        new_state, parent_index, action = select_new_node_and_play(tree, env)
-
-        parent_state = jax.tree_map(lambda x: x[parent_index], tree.states)
-
-        action_mask = get_action_mask(parent_state)
-
-        strategy = action_mask / action_mask.sum()
+        tree, n_added = add_children(tree=tree, state=new_state, env=env, node_number=n)
 
         tree = tree._replace(
-            node_visits=tree.node_visits.at[next_node_index].set(1),
-            node_values=tree.node_values.at[next_node_index].set(new_state.rewards),
+            node_visits=tree.node_visits.at[child_index].set(1),
+            node_values=tree.node_values.at[child_index].set(new_state.rewards),
             states=jax.tree_map(
-                lambda x, y: x.at[next_node_index].set(y),
-                tree.states,
-                new_state,
+                lambda x, y: x.at[child_index].set(y), tree.states, new_state
             ),
-            raw_values=tree.raw_values.at[next_node_index].set(new_state.rewards),
-            children_prior_logits=tree.children_prior_logits.at[parent_index].set(
-                strategy
-            ),
-            children_index=tree.children_index.at[parent_index, action].set(
-                next_node_index
-            ),
+            raw_values=tree.raw_values.at[child_index].set(new_state.rewards),
+            children_index=tree.children_index.at[parent_index, action].set(child_index),
             children_rewards=tree.children_rewards.at[parent_index, action].set(
                 new_state.rewards
             ),
             children_values=tree.children_values.at[parent_index, action].set(
                 new_state.rewards
             ),
-            parents=tree.parents.at[next_node_index].set(parent_index),
-            action_from_parent=tree.action_from_parent.at[next_node_index].set(action),
-            depth=tree.depth.at[next_node_index].set(tree.depth[parent_index] + 1),
+            parents=tree.parents.at[child_index].set(parent_index),
+            action_from_parent=tree.action_from_parent.at[child_index].set(action),
+            depth=tree.depth.at[child_index].set(tree.depth[parent_index] + 1),
+            to_visit=tree.to_visit.at[child_index].set(False),
         )
 
-        return tree, n
+        return tree, n + n_added
 
     tree, _ = jax.lax.while_loop(cond_fn, loop_fn, (tree, 0))
     return tree
@@ -237,7 +232,7 @@ def traverse_tree_cfr(
     env: pgx.Env,
     traverser: int = 0,
 ) -> Tree:
-    def cond_fn(val: tuple[Tree, Int[Array, ""]]) -> Bool[Array, ""]:
+    def cond_fn(val: tuple[Tree, jax.Array]) -> Bool[Array, ""]:
         tree, n = val
         n_max_nodes = len(tree.node_visits)
         action_mask = jax.vmap(get_action_mask)(tree.states)
@@ -248,7 +243,7 @@ def traverse_tree_cfr(
 
         return jnp.logical_and(is_to_visit.any(), (n < n_max_nodes))
 
-    def loop_fn(val: tuple[Tree, Int[Array, ""]]) -> tuple[Tree, Int[Array, ""]]:
+    def loop_fn(val: tuple[Tree, jax.Array]) -> tuple[Tree, jax.Array]:
         tree, n = val
 
         n += 1

@@ -1,9 +1,15 @@
-from __future__ import annotations
-
 from typing import NamedTuple
 
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, PyTree
+
+
+class classproperty:
+    def __init__(self, func):
+        self.fget = func
+
+    def __get__(self, instance, owner):
+        return self.fget(owner)
 
 
 class Root(NamedTuple):
@@ -72,18 +78,15 @@ class Tree(NamedTuple):
     depth: Int[Array, "..."]
     extra_data: dict[str, Array]
 
-    @classmethod
-    @property
+    @classproperty
     def ROOT_INDEX(cls) -> Int[Array, ""]:
         return jnp.asarray(ROOT_INDEX)
 
-    @classmethod
-    @property
+    @classproperty
     def NO_PARENT(cls) -> Int[Array, ""]:
         return jnp.asarray(NO_PARENT)
 
-    @classmethod
-    @property
+    @classproperty
     def UNVISITED(cls) -> Int[Array, ""]:
         return jnp.asarray(UNVISITED)
 
