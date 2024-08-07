@@ -1,5 +1,6 @@
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, PyTree
 
@@ -77,6 +78,7 @@ class Tree(NamedTuple):
     states: PyTree
     depth: Int[Array, "..."]
     extra_data: dict[str, Array]
+    to_visit: jax.Array
 
     @classproperty
     def ROOT_INDEX(cls) -> Int[Array, ""]:

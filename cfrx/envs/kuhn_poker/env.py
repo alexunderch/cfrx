@@ -114,13 +114,11 @@ class KuhnPoker(pgx.kuhn_poker.KuhnPoker, cfrx.envs.Env):
 
     def get_action_mask(self, state: State) -> jax.Array:
 
-        action_mask = jax.lax.cond(
-            state.chance_node,
-            lambda x: (x.chance_prior > 0),
-            lambda x: x.legal_action_mask,
-            state,
-        )
-        return action_mask
+        return state.legal_action_mask
+
+    def get_chance_mask(self, state: State) -> jax.Array:
+
+        return state.chance_prior > 0
 
     def info_state_idx(self, info_state: InfoState) -> Int[Array, ""]:
         info_state_ravel = ravel(info_state)
@@ -185,7 +183,7 @@ class KuhnPoker(pgx.kuhn_poker.KuhnPoker, cfrx.envs.Env):
         self, state: State, action: Int[Array, ""], random_key: PRNGKeyArray
     ) -> State:
         env_state = super()._step(state=state, action=action, key=random_key)
-
+        print(env_state.legal_action_mask.shape)
         return State(
             current_player=env_state.current_player.astype(jnp.int8),
             observation=env_state.observation,
