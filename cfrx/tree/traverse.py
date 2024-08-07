@@ -325,18 +325,20 @@ def traverse_tree_cfr(
             info_state=parent_state.info_state,
             action_mask=parent_state.legal_action_mask,
             use_behavior_policy=jnp.bool_(False),
-        )[action]
+        )
 
-        chance_strategy = (parent_state.chance_prior / parent_state.chance_prior.sum())[
-            action
-        ]
-        strategy = jnp.where(parent_state.chance_node, chance_strategy, strategy)
+        chance_strategy = (
+            parent_state.chance_prior[action] / parent_state.chance_prior.sum()
+        )
+        action_prob = jnp.where(
+            parent_state.chance_node, chance_strategy, strategy[action]
+        )
 
         tree = update_running_probabilities(
             tree=tree,
             parent_index=parent_index,
             next_node_index=child_index,
-            strategy=strategy,
+            strategy=action_prob,
             traverser=traverser,
         )
 
@@ -353,6 +355,9 @@ def traverse_tree_cfr(
             ),
             children_values=tree.children_values.at[parent_index, action].set(
                 new_state.rewards
+            ),
+            children_prior_logits=tree.children_prior_logits.at[parent_index].set(
+                jnp.where(parent_state.chance_node, chance_strategy, strategy)
             ),
             parents=tree.parents.at[child_index].set(parent_index),
             action_from_parent=tree.action_from_parent.at[child_index].set(action),
