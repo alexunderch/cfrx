@@ -320,6 +320,7 @@ def traverse_tree_cfr(
 
         chance_mask = env.get_chance_mask(parent_state)
         chance_strategy = chance_mask[action] / chance_mask.sum()
+        # jax.debug.breakpoint()
 
         action_prob = jnp.where(
             parent_state.chance_node, chance_strategy, strategy[action]

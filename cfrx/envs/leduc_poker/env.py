@@ -170,7 +170,7 @@ class LeducPoker(pgx.leduc_holdem.LeducHoldem, cfrx.envs.Env):
             _chips=env_state._chips,
             _raise_count=env_state._raise_count,
             info_state=info_state,
-            chance_prior=jnp.ones(NUM_DIFFERENT_CARDS, dtype=int) * NUM_REPEAT_CARDS,
+            chance_prior=jnp.ones(NUM_TOTAL_CARDS, dtype=int),
             chance_node=jnp.bool_(True),
         )
 
