@@ -113,12 +113,13 @@ class KuhnPoker(pgx.kuhn_poker.KuhnPoker, cfrx.envs.Env):
         return rep
 
     def get_action_mask(self, state: State) -> jax.Array:
-
         return state.legal_action_mask
 
     def get_chance_mask(self, state: State) -> jax.Array:
-
         return state.chance_prior > 0
+
+    def get_info_state(self, state: State) -> jax.Array:
+        return state.info_state
 
     def info_state_idx(self, info_state: InfoState) -> Int[Array, ""]:
         info_state_ravel = ravel(info_state)

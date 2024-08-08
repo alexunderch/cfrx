@@ -38,9 +38,7 @@ class State(pgx.leduc_holdem.State):
         chance_node=jnp.bool_(True),
     )
     chance_node: Bool[Array, ""] = jnp.bool_(False)
-    chance_prior: Float[Array, "..."] = (
-        jnp.ones(NUM_DIFFERENT_CARDS, dtype=int) * NUM_REPEAT_CARDS
-    )
+    chance_prior: Float[Array, "..."] = jnp.ones(NUM_TOTAL_CARDS, dtype=int)
 
 
 def convert_info_state_to_idx(info_state: InfoState) -> jnp.ndarray:
@@ -134,6 +132,15 @@ class LeducPoker(pgx.leduc_holdem.LeducHoldem, cfrx.envs.Env):
                     rep += strings[action]
         return rep
 
+    def get_action_mask(self, state: State) -> jax.Array:
+        return state.legal_action_mask
+
+    def get_chance_mask(self, state: State) -> jax.Array:
+        return state.chance_prior > 0
+
+    def get_info_state(self, state: State) -> jax.Array:
+        return state.info_state
+
     def info_state_idx(self, info_state: InfoState) -> Array:
         idx = convert_info_state_to_idx(info_state)
         return jnp.asarray(REVERSE_INFO_SETS_LOOKUP)[idx]
@@ -208,7 +215,9 @@ class LeducPoker(pgx.leduc_holdem.LeducHoldem, cfrx.envs.Env):
         self, state: State, action: Int[Array, ""], random_key: PRNGKeyArray
     ) -> State:
         draw_player = NUM_TOTAL_CARDS - state.chance_prior.sum()
-        cards = state._cards.at[draw_player].set(action.astype(jnp.int8))
+        action = action.astype(jnp.int8)
+        card_rank = action % NUM_DIFFERENT_CARDS
+        cards = state._cards.at[draw_player].set(card_rank)
         chance_prior = state.chance_prior.at[action].add(-1)
         chance_node = (cards[:2] == -1).any()
 
