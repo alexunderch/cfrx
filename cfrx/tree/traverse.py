@@ -318,8 +318,7 @@ def traverse_tree_cfr(
             use_behavior_policy=jnp.bool_(False),
         )
 
-        chance_mask = env.get_chance_mask(parent_state)
-        chance_strategy = chance_mask[action] / chance_mask.sum()
+        chance_strategy = env.get_chance_probs(parent_state)[action]
         # jax.debug.breakpoint()
 
         action_prob = jnp.where(
